@@ -1,21 +1,20 @@
 # HEARTBEAT.md — PostMaster 📬
 
-## Checklist de Heartbeat
+## Ciclo de execução
 
-A cada execução, seguir essa ordem. Nada mais.
+Seguir essa ordem exata. Nada mais.
 
 ---
 
-### 0. Consultar memória (sempre primeiro)
-
-Antes de qualquer coisa, recuperar contexto acumulado:
+### 0. Carregar contexto (sempre primeiro)
 
 ```
-memory_search("remetentes conhecidos padrões e-mail")
-memory_search("critérios escalada Lincoln")
+memory_search("remetentes conhecidos padrões escalada")
+memory_get("memory/senders.md")
+memory_get("memory/patterns.md")
 ```
 
-Usar o que foi aprendido para classificar melhor neste ciclo.
+Usar o que está nesses arquivos para classificar melhor neste ciclo.
 
 ---
 
@@ -27,48 +26,75 @@ gog gmail search "in:inbox is:unread" --account lincoln@livingnet.com.br --max 2
 ```
 
 Para cada e-mail:
-- Cruzar remetente com memória — já vi antes? qual categoria?
-- Classificar e aplicar label adequada
-- Se urgente → notificar Lincoln imediatamente via Telegram
-- Se ruído → marcar como lido silenciosamente
+- Cruzar remetente com `memory/senders.md` — já mapeado?
+- Se não mapeado → adicionar na seção "Desconhecidos recentes" do senders.md
+- Classificar e aplicar label
+- Se urgente → notificar Lincoln via Telegram imediatamente
 
-### 2. Critérios de escalada imediata
-
-Escalar SEMPRE se:
-- Assunto contém: fatura, vencimento, boleto, pagamento, bloqueio, suspensão, erro, alert, 500, critical
-- Remetente for pessoa física (não noreply/automático)
+**Critérios de escalada imediata:**
+- Assunto contém: fatura, vencimento, boleto, pagamento, bloqueio, suspensão, erro, 500, critical, alert
+- Remetente é pessoa real (não noreply/automático)
 - Alerta de segurança real
-- Erros de sistema/produção (Sentry, monitoramento, infra)
-- Qualquer coisa sobre domínio, servidor ou infraestrutura
+- Erro de produção (Sentry, monitoramento, infra)
 
 ---
 
-### 3. Registrar aprendizados no daily note
+### 2. Registrar no daily note
 
-Após processar, escrever em `memory/YYYY-MM-DD.md` (append):
+Escrever em `memory/YYYY-MM-DD.md` (append, só se houve algo):
+
+```markdown
+## HH:MM — Heartbeat
+- gmail: X processados, Y escalados
+- livingnet: X processados, Y escalados
+- Escalados: [lista resumida com remetente + assunto]
+- Novos remetentes: [lista]
+- Anomalia de volume? [sim/não — detalhar se sim]
+```
+
+---
+
+### 3. Atualizar patterns.md (quando relevante)
+
+Atualizar `memory/patterns.md` quando:
+- Volume do dia diverge do padrão esperado (>2x ou <0.5x)
+- Nova categoria recorrente surgiu
+- Lincoln corrigiu uma escalada (registrar em "O que o Lincoln considera urgente")
+- Identificou padrão novo que merece label próprio → adicionar em "Labels sugeridas"
+
+---
+
+### 4. Atualizar senders.md (quando novo remetente identificado)
+
+Mover remetentes de "Desconhecidos recentes" para a categoria correta após 2+ aparições.
+
+---
+
+### 5. Relatório rico (quando escalar)
+
+Ao notificar o Lincoln, usar formato detalhado:
 
 ```
-## HH:MM — Ciclo de heartbeat
-- gmail: X não lidos, Y escalados, Z processados silenciosamente
-- livingnet: X não lidos, Y escalados, Z processados silenciosamente
-- Novos remetentes identificados: [lista]
-- Padrões observados: [qualquer anomalia ou insight]
+📬 PostMaster — [conta]
+• [N] e-mails processados
+
+⚠️ Urgente:
+• [Remetente] — [assunto resumido]
+
+📋 Processados silenciosamente:
+• 2x Dev/GitHub (PR notifications)
+• 1x Finance (extrato automático)
+• 3x Promotion (marcados lidos)
 ```
 
-Só escrever se houve algo a registrar. Se foi tudo silencioso, não criar entrada.
+Sem urgências → `HEARTBEAT_OK`.
 
 ---
 
-### 4. Atualizar MEMORY.md (a cada ~10 ciclos ou quando aprender algo novo)
+### 6. Auto-evolução semanal (toda segunda-feira)
 
-Quando identificar um padrão novo ou corrigir uma classificação errada:
-- Adicionar remetente em "Remetentes conhecidos"
-- Ajustar critérios de escalada se o Lincoln corrigiu algum comportamento
-- Atualizar volumes típicos se divergir muito do esperado
-
----
-
-### 5. Sumário ao final
-
-Se houve escalada ou processamento relevante: reportar ao Lincoln via Telegram (curto e direto).
-Se não houve nada novo: `HEARTBEAT_OK`.
+Revisar `memory/patterns.md`:
+- Atualizar volumes médios com dados da semana anterior
+- Consolidar remetentes novos do senders.md
+- Verificar se algum label sugerido já tem volume para criar
+- Registrar aprendizados da semana em `memory/YYYY-MM-DD.md`
