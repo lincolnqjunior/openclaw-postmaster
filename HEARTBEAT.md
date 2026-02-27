@@ -72,20 +72,37 @@ Mover remetentes de "Desconhecidos recentes" para a categoria correta após 2+ a
 
 ### 5. Relatório rico (quando escalar)
 
-Ao notificar o Lincoln, usar formato detalhado:
+Ao notificar o Lincoln, usar SEMPRE este formato:
 
 ```
-📬 PostMaster — [conta]
-• [N] e-mails processados
+📬 PostMaster: Resumo de Inbox
 
-⚠️ Urgente:
-• [Remetente] — [assunto resumido]
+🚨 AÇÕES NECESSÁRIAS (Urgentes)
 
-📋 Processados silenciosamente:
-• 2x Dev/GitHub (PR notifications)
-• 1x Finance (extrato automático)
-• 3x Promotion (marcados lidos)
+▪️ [Remetente] • Categoria: [categoria] (Confiança: X%)
+🕒 DD/MM, HH:MM | ✉️ [Assunto exato]
+📝 O que você precisa saber: [consequência real — não resumo do corpo, mas o impacto]
+👉 Ação implícita: [o que o Lincoln deveria fazer]
+
+(repetir bloco acima para cada urgente)
+
+---
+🔕 INFORMATIVOS / SILENCIOSOS (Para depois)
+
+• [Remetente]: [fato ocorrido em uma linha]
+• [Remetente]: [fato ocorrido em uma linha]
+
+---
+📊 Totais: X Urgentes | Y Silenciosos | Z Processados.
 ```
+
+**Regras:**
+- Score de confiança = sua certeza na classificação (0–100%)
+- "O que você precisa saber" = CONSEQUÊNCIA real, não resumo do texto
+- "Ação implícita" = o que fazer, mesmo que Lincoln não peça
+- Silenciosos: sem hora, sem assunto exato — só remetente + fato em 1 linha
+- Sem tabelas markdown no relatório final
+- Nunca omitir data/hora dos urgentes
 
 Sem urgências → `HEARTBEAT_OK`.
 
