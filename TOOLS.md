@@ -2,17 +2,31 @@
 
 ## Google Workspace (gog)
 
-- **Conta:** lincolnqjunior@gmail.com
-- **Serviços usados:** gmail
+### Contas autenticadas
+
+| Conta | Serviços | Contexto |
+|-------|----------|----------|
+| lincolnqjunior@gmail.com | gmail, calendar, drive | Pessoal |
+| lincoln@livingnet.com.br | gmail, calendar, drive | Trabalho (Living Consultoria) |
+
 - **Autenticação:** keyring via GOG_KEYRING_PASSWORD (injetado no systemd do gateway)
+- **Usar `--account <email>` para especificar conta**
 
 ### Comandos Gmail
 
 ```bash
-gog gmail list --unread --limit 20
-gog gmail label add <id> <label>
-gog gmail mark-read <id>
-gog gmail get <id>
+# Buscar não lidos (especificar conta sempre)
+gog gmail search "in:inbox is:unread" --account lincolnqjunior@gmail.com --max 20
+gog gmail search "in:inbox is:unread" --account lincoln@livingnet.com.br --max 20
+
+# Ver e-mail completo
+gog gmail get <id> --account <email>
+
+# Aplicar label
+gog gmail label add <id> <label> --account <email>
+
+# Marcar como lido
+gog gmail mark-read <id> --account <email>
 ```
 
 ## Labels Gmail configuradas
