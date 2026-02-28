@@ -1,38 +1,54 @@
-# HEARTBEAT — PostMaster
+# HEARTBEAT.md — PostMaster PIX Automation
 
-## 1. Ingestão GPay (1x por dia)
-Verifica se já rodou hoje. Se não, executa:
-```bash
-node /home/lincoln/.openclaw/workspaces/postmaster/scripts/ingest-gpay.js
+## Rotina diária (21h BRT via cron)
+
+### 1. Ingestão GPay
 ```
-Se retornar "Sessão expirada", notifica o Arquiteto via sessions_send.
-
-## 2. Classificação automática
-Após qualquer ingestão, ou se houver pendentes:
-```bash
-node /home/lincoln/.openclaw/workspaces/postmaster/scripts/classify.js
+cd /home/lincoln/.openclaw/workspaces/postmaster
+node scripts/ingest-gpay.js
 ```
-Para cada item com `needs_review: true`, enviar mensagem individual ao Lincoln via Telegram:
-> "💸 Nova despesa não reconhecida: **[recebedor]** — R$ [valor] em [data].
-> Qual categoria? (ex: Transporte, Alimentação, Saúde, Compras, Assinatura, Outros)"
+- Reutiliza sessão Chrome relay (aba wallet.google.com já aberta)
+- Se erro "Sessão expirada" → notificar Lincoln para reabrir aba e re-exportar cookies
 
-Aguardar resposta antes de enviar a próxima (sem agrupar).
+### 2. Classificar pendentes
+```
+node scripts/classify.js
+```
+- Items com confiança < 0.80 → enviar Telegram ao Lincoln (1 por 1, não agrupado)
+- Formato: "Nova transação: R$ XX para NOME — qual categoria?"
 
-## 3. Email
-```bash
-gog gmail search "in:inbox is:unread newer_than:3d" --account lincolnqjunior@gmail.com --max 20
-gog gmail search "in:inbox is:unread newer_than:3d" --account lincoln@livingnet.com.br --max 20
+### 3. Relatório
+```
+node scripts/report.js --type daily    # todo dia
+node scripts/report.js --type weekly   # domingo
+node scripts/report.js --type monthly  # último dia do mês
 ```
 
-## 4. Fechamento mensal (último dia do mês)
-Se hoje for o último dia do mês e state.json não tiver `waiting_for`, enviar:
-> "📊 Fim de mês! Me manda o extrato do **Banco do Brasil** (.xlsx) para fechar o mês."
-Salvar `state.json` com `{ "waiting_for": "bb_extract", "since": "<now>" }`.
+## Rotina fim de mês (último dia às 21h)
 
-## 5. Processar upload de extrato
-Se `state.json.waiting_for == "bb_extract"` e Lincoln enviou um arquivo .xlsx:
-```bash
-node /home/lincoln/.openclaw/workspaces/postmaster/scripts/ingest-bb-xlsx.js --file <path>
-node /home/lincoln/.openclaw/workspaces/postmaster/scripts/classify.js
-```
-Limpar `waiting_for` após processar.
+1. Gerar relatório mensal
+2. Enviar relatório ao Lincoln
+3. Solicitar extrato BB: "Lincoln, fechamento do mês. Me manda o extrato do BB (.csv) para conciliação."
+4. Salvar state: data/state.json → { "waiting_for": "bb_extract", "since": "<timestamp>" }
+5. Quando arquivo chegar: node scripts/ingest-bb-xlsx.js --file <path> (aceita CSV também)
+6. Detectar e marcar duplicatas GPay/BB
+7. Enviar relatório consolidado final
+
+## Verificar em cada heartbeat
+
+- data/state.json — se waiting_for: "bb_extract" e >2 dias → reenviar lembrete
+- Cookies Google expiram em 2027-04-04 — avisar Lincoln 30 dias antes
+
+## Contatos fixos para classificação automática
+
+ELIANE DOS SANTOS    → Faxina
+ALCIR BUENO FRANCO   → Aluguel
+ASSOC FRANCISCANA    → Educação/Escola
+Claudemir Constantino→ Bar/Tabacaria
+STEPHANY CABRAL      → Pet Shop (Jessie/cachorra, Frida e Luke/gatos)
+GUSTAVO DEISTER      → Ervas Medicinais
+ENZO ITAIPAVA        → Combustível
+AUTO POSTO           → Combustível
+DISTRIBUIDORA CORREAS→ Água Potável
+BB Rende Fácil       → Transferência Interna (NUNCA contar como gasto)
+LIVING CONSULT       → receita/salário (ignorar para despesas)
