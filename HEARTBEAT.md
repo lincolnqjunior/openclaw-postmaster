@@ -115,3 +115,27 @@ Revisar `memory/patterns.md`:
 - Consolidar remetentes novos do senders.md
 - Verificar se algum label sugerido já tem volume para criar
 - Registrar aprendizados da semana em `memory/YYYY-MM-DD.md`
+
+---
+
+### 7. Integração tldv — Extração automática de transcrições
+
+Ao detectar e-mail do tldv com anotações prontas:
+
+**Identificação:**
+- Remetente: `no-reply@tldv.io`
+- Assunto contém: "Anotações e respostas por IA da reunião"
+
+**Ação:**
+1. Extrair link de reunião do corpo (formato: `https://tldv.io/app/meetings/<ID>`)
+2. Executar:
+```bash
+cd /home/lincoln/.openclaw/workspace
+python3 scripts/tldv-extract.py <meeting_url>
+```
+3. Se salvo com sucesso → notificar Lincoln com o nome do arquivo
+4. Se arquivada (código 2) → informar Lincoln que precisa do Chrome relay
+5. Se erro de token → avisar Lincoln para renovar (token expira ~12/03/2026)
+
+**Silenciar:**
+- E-mails "esgotou seus resumos com IA gratuitos" → HEARTBEAT_OK, sem ação

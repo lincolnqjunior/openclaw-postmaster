@@ -1,8 +1,8 @@
 {
-  "lastCheck": "2026-02-27T20:25:00Z",
+  "lastCheck": "2026-02-27T22:18:00Z",
   "accounts": {
     "gmail": {
-      "processedToday": 60,
+      "processedToday": 80,
       "escalatedToday": 6
     },
     "livingnet": {
