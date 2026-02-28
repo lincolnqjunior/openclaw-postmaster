@@ -1,148 +1,148 @@
 #!/usr/bin/env node
 /**
- * ingest-gpay.js — Scrape Google My Activity (GPay) e insere no SQLite
+ * ingest-gpay.js — Extrai transações do wallet.google.com reutilizando
+ * sessão aberta no Chrome relay (ou navegando com cookies salvos).
  *
  * Uso:
- *   node ingest-gpay.js [--db <path>] [--profile <path>] [--headless true|false] [--dry-run]
- *
- * Requer: playwright + better-sqlite3
- * Profile: ~/.openclaw/workspaces/postmaster/chrome-profile (login manual na 1ª vez)
+ *   node ingest-gpay.js [--db <path>] [--cookies <path>] [--dry-run]
  */
-const path   = require('path');
-const crypto = require('crypto');
+const path     = require('path');
+const crypto   = require('crypto');
+const fs       = require('fs');
 const { chromium } = require('playwright');
-const Database = require('better-sqlite3');
+const Database  = require('better-sqlite3');
 
 const args = process.argv.slice(2);
-const get  = (flag, def) => { const i = args.indexOf(flag); return i !== -1 ? args[i+1] : def; };
-const has  = (flag) => args.includes(flag);
+const get  = (f, d) => { const i = args.indexOf(f); return i !== -1 ? args[i+1] : d; };
+const has  = f => args.includes(f);
 
-const dbPath      = get('--db',      path.join(__dirname, '../data/despesas_pix.sqlite'));
-const profilePath = get('--profile', path.join(__dirname, '../chrome-profile'));
-const headless    = get('--headless', 'true') === 'true';
-const dryRun      = has('--dry-run');
+const dbPath     = get('--db',      path.join(__dirname, '../data/despesas_pix.sqlite'));
+const cookiePath = get('--cookies', path.join(__dirname, '../data/cookies-google.json'));
+const dryRun     = has('--dry-run');
 
-const GPAY_URL = 'https://myactivity.google.com/product/gpay/other';
-const TIMEOUT  = 30000;
+const GATEWAY_TOKEN = '36fdbd08015f8027b062c051fe48c723c0db1a122846802e';
+const WALLET_URL    = 'https://wallet.google.com/wallet/transactions';
 
-function uid(date, value, recebedor) {
-  const hash = crypto.createHash('sha1')
-    .update(`${date}|${value}|${recebedor}`)
-    .digest('hex')
-    .slice(0, 8);
-  return `gpay:${date}:${value}:${hash}`;
+function makeUid(date, valor, recebedor) {
+  const h = crypto.createHash('sha1').update(`${date}|${valor}|${recebedor}`).digest('hex').slice(0, 8);
+  return `gpay:${date}:${valor}:${h}`;
 }
 
-function parseValue(text) {
-  // "R$ 29,00" ou "-R$ 29,00" → 29.00 (saída positiva)
-  const clean = text.replace(/[R$\s]/g, '').replace('.','').replace(',', '.');
-  return Math.abs(parseFloat(clean));
+function parseValor(text) {
+  const m = text.match(/R\$\s*([\d.,]+)/);
+  if (!m) return null;
+  return parseFloat(m[1].replace(/\./g, '').replace(',', '.'));
 }
 
-async function scrape(lastTxAt) {
-  const browser = await chromium.launchPersistentContext(profilePath, {
-    headless,
-    args: ['--no-sandbox', '--disable-dev-shm-usage'],
-    timeout: TIMEOUT,
-  });
+function parseDate(raw) {
+  const hoje = new Date();
+  const pad  = n => String(n).padStart(2, '0');
+  const meses = { jan:1,fev:2,mar:3,abr:4,mai:5,jun:6,jul:7,ago:8,set:9,out:10,nov:11,dez:12 };
 
-  const page = browser.pages().length > 0 ? browser.pages()[0] : await browser.newPage();
+  const d = (raw || '').toLowerCase().trim();
+  if (/hoje/.test(d))  return hoje.toISOString().slice(0,10);
+  if (/ontem/.test(d)) { const dd = new Date(hoje); dd.setDate(dd.getDate()-1); return dd.toISOString().slice(0,10); }
 
-  console.log('Navegando para ' + GPAY_URL);
-  await page.goto(GPAY_URL, { waitUntil: 'networkidle', timeout: TIMEOUT });
-
-  // Verifica se caiu em login
-  const currentUrl = page.url();
-  if (currentUrl.includes('accounts.google.com')) {
-    await browser.close();
-    throw new Error('Sessão expirada — refazer login no Chrome relay e salvar o perfil.');
+  const mMatch = d.match(/(\d{1,2})\s+de\s+([a-zç]{3})/);
+  if (mMatch && meses[mMatch[2]]) {
+    let year = hoje.getFullYear();
+    if (meses[mMatch[2]] > hoje.getMonth() + 1) year--;
+    return `${year}-${pad(meses[mMatch[2]])}-${pad(parseInt(mMatch[1]))}`;
   }
 
-  // Aguarda items de atividade carregarem
-  await page.waitForSelector('c-wiz', { timeout: TIMEOUT }).catch(() => {});
+  const diasPT = { seg:1,ter:2,qua:3,qui:4,sex:5,sáb:6,sab:6,dom:0 };
+  for (const [nome, wday] of Object.entries(diasPT)) {
+    if (d.includes(nome)) {
+      const diff = (hoje.getDay() - wday + 7) % 7 || 7;
+      const dd = new Date(hoje); dd.setDate(dd.getDate() - diff);
+      return dd.toISOString().slice(0,10);
+    }
+  }
+  return hoje.toISOString().slice(0,10);
+}
 
-  // Extrai transações do DOM
-  const transactions = await page.evaluate((lastTxAtStr) => {
-    const results = [];
-    const lastTs  = lastTxAtStr ? new Date(lastTxAtStr).getTime() : 0;
+async function extractFromPage(page) {
+  // Clica "Ver mais" até sumir
+  for (let i = 0; i < 10; i++) {
+    const btn = await page.$('button:has-text("Ver mais transações")');
+    if (!btn) break;
+    await btn.click();
+    await page.waitForTimeout(1500);
+  }
 
-    // Seletores do My Activity — podem precisar de ajuste conforme Google atualizar o DOM
-    const items = document.querySelectorAll('[data-item-type], .fp-display-item, div[jscontroller]');
+  return page.evaluate(() => {
+    // Filtra via JS resolvendo a.href (não o atributo relativo)
+    const links = [...document.querySelectorAll('a')]
+      .filter(a => a.href.includes('/wallet/transactions/') &&
+                   a.href !== 'https://wallet.google.com/wallet/transactions' &&
+                   !a.href.endsWith('/transactions'));
 
-    items.forEach(el => {
-      const text = el.innerText || '';
-      if (!text.includes('R$')) return;
-
-      // Tenta extrair linhas de texto do item
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-      // Valor: linha com "R$"
-      const valorLine = lines.find(l => l.includes('R$'));
-      if (!valorLine) return;
-
-      // Data: linha com formato de data (dd/mm/aaaa ou "hoje", "ontem")
-      const dateLineRaw = lines.find(l => /\d{1,2}\/\d{1,2}\/\d{4}/.test(l) || /hoje|ontem/i.test(l));
-      const dateMatch   = dateLineRaw ? dateLineRaw.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/) : null;
-      let dateStr;
-      if (dateMatch) {
-        dateStr = `${dateMatch[3]}-${String(dateMatch[2]).padStart(2,'0')}-${String(dateMatch[1]).padStart(2,'0')}`;
-      } else if (/hoje/i.test(dateLineRaw||'')) {
-        dateStr = new Date().toISOString().slice(0,10);
-      } else if (/ontem/i.test(dateLineRaw||'')) {
-        const d = new Date(); d.setDate(d.getDate()-1);
-        dateStr = d.toISOString().slice(0,10);
-      } else {
-        dateStr = new Date().toISOString().slice(0,10);
-      }
-
-      const ts = new Date(dateStr).getTime();
-      if (ts <= lastTs) return; // já ingerido
-
-      // Recebedor: linha que não é data nem valor nem status
-      const recebedor = lines.find(l =>
-        !l.includes('R$') &&
-        !/\d{1,2}\/\d{1,2}\/\d{4}/.test(l) &&
-        !/hoje|ontem|pix|google pay|realizado|sucesso|falh/i.test(l)
-      ) || 'Desconhecido';
-
-      const status = /falh|não (foi|possível)/i.test(text) ? 'falhou' : 'realizado';
-
-      results.push({
-        date:      dateStr,
-        valorRaw:  valorLine,
-        recebedor: recebedor.slice(0, 200),
-        status,
-        raw:       text.slice(0, 500),
-      });
+    return links.map(a => {
+      const lines  = (a.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+      const txId   = a.href.split('/').pop();
+      const isFail = lines.some(l => /com falha/i.test(l));
+      const recebedor = lines[1] || lines[0] || 'Desconhecido';
+      const dateRaw   = lines[2] || lines[1] || '';
+      const valorLine = lines.find(l => l.includes('R$')) || '';
+      return { recebedor, dateRaw, valorLine, isFail, txId, raw: lines.join(' | ').slice(0, 400) };
     });
-
-    return results;
-  }, lastTxAt);
-
-  await browser.close();
-  return transactions;
+  });
 }
 
 async function main() {
-  const db = new Database(dbPath);
-
-  const state   = db.prepare("SELECT last_tx_at FROM ingest_state WHERE source='gpay'").get();
+  const db       = new Database(dbPath);
+  const state    = db.prepare("SELECT last_tx_at FROM ingest_state WHERE source='gpay'").get();
   const lastTxAt = state ? state.last_tx_at : null;
 
-  console.log('Última transação conhecida: ' + (lastTxAt || 'nenhuma'));
+  console.log(`Última tx registrada: ${lastTxAt || 'nenhuma'}`);
 
-  let transactions;
-  try {
-    transactions = await scrape(lastTxAt);
-  } catch (err) {
-    console.error('Erro no scraping: ' + err.message);
+  // Conecta no Chrome relay que já tem a sessão aberta
+  const browser = await chromium.connectOverCDP(`ws://127.0.0.1:18792/cdp?token=${GATEWAY_TOKEN}`);
+  const ctx     = browser.contexts()[0];
+
+  // Reusar página do wallet já aberta, ou abrir nova
+  let page = ctx.pages().find(p => p.url().includes('wallet.google.com/wallet/transactions'));
+  if (!page) {
+    console.log('Abrindo nova aba do wallet...');
+    const cookies = JSON.parse(fs.readFileSync(cookiePath, 'utf8'));
+    page = await ctx.newPage();
+    await ctx.addCookies(cookies);
+    await page.goto(WALLET_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(3000);
+  } else {
+    console.log('Reutilizando aba já aberta:', page.url());
+    // Recarrega para garantir dados frescos
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 });
+    await page.waitForTimeout(3000);
+  }
+
+  if (page.url().includes('accounts.google.com')) {
+    await browser.close(); db.close();
+    console.error('Sessão expirada — re-exportar cookies.');
     process.exit(1);
   }
 
-  console.log(`Transações encontradas: ${transactions.length}`);
+  const raw = await extractFromPage(page);
+  await browser.close();
+
+  console.log(`Links encontrados na página: ${raw.length}`);
+
+  // Processar e filtrar
+  const parsed = raw
+    .filter(t => !t.isFail && t.valorLine)
+    .map(t => {
+      const valor    = parseValor(t.valorLine);
+      const dateStr  = parseDate(t.dateRaw);
+      if (!valor) return null;
+      if (lastTxAt && dateStr <= lastTxAt) return null;
+      return { ...t, valor, dateStr };
+    })
+    .filter(Boolean);
+
+  console.log(`Transações válidas (novas): ${parsed.length}`);
 
   if (dryRun) {
-    console.log(JSON.stringify(transactions, null, 2));
+    parsed.forEach(t => console.log(`  ${t.dateStr} | ${t.recebedor.slice(0,40).padEnd(40)} | R$ ${t.valor.toFixed(2)}`));
     db.close();
     return;
   }
@@ -151,39 +151,30 @@ async function main() {
     INSERT OR IGNORE INTO comprovantes
       (source_uid, source, data_transacao, valor, recebedor, banco_origem, status, raw_content)
     VALUES
-      (@source_uid, 'gpay', @data_transacao, @valor, @recebedor, 'Google Pay', 'pendente_revisao', @raw_content)
+      (@source_uid,'gpay',@data_transacao,@valor,@recebedor,'Google Pay','pendente_revisao',@raw_content)
   `);
+  const updState = db.prepare(
+    "UPDATE ingest_state SET last_run_at=@now, last_tx_at=@tx WHERE source='gpay'"
+  );
 
-  const updateState = db.prepare(`
-    UPDATE ingest_state SET last_run_at=@now, last_tx_at=@last_tx
-    WHERE source='gpay'
-  `);
-
-  const insertMany = db.transaction((txs) => {
-    let inserted = 0;
-    let newestDate = lastTxAt || '1970-01-01';
-    for (const tx of txs) {
-      const valor = parseValue(tx.valorRaw);
-      const suid  = uid(tx.date, valor, tx.recebedor);
-      const res   = insert.run({
-        source_uid:     suid,
-        data_transacao: tx.date,
-        valor,
-        recebedor:      tx.recebedor,
-        raw_content:    JSON.stringify(tx),
+  const inserted = db.transaction(txs => {
+    let n = 0, newest = lastTxAt || '1970-01-01';
+    for (const t of txs) {
+      const r = insert.run({
+        source_uid:     makeUid(t.dateStr, t.valor, t.recebedor),
+        data_transacao: t.dateStr,
+        valor:          t.valor,
+        recebedor:      t.recebedor.slice(0, 200),
+        raw_content:    JSON.stringify(t),
       });
-      if (res.changes > 0) {
-        inserted++;
-        if (tx.date > newestDate) newestDate = tx.date;
-      }
+      if (r.changes > 0) { n++; if (t.dateStr > newest) newest = t.dateStr; }
     }
-    updateState.run({ now: new Date().toISOString(), last_tx: newestDate });
-    return inserted;
-  });
+    updState.run({ now: new Date().toISOString(), tx: newest });
+    return n;
+  })(parsed);
 
-  const inserted = insertMany(transactions);
-  console.log(`Inseridas: ${inserted} novas transações.`);
+  console.log(`Inseridas no banco: ${inserted}`);
   db.close();
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch(e => { console.error(e.message); process.exit(1); });
