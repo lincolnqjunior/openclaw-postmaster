@@ -1,0 +1,21 @@
+{
+  "name": "postmaster",
+  "version": "1.0.0",
+  "description": "PostMaster automation scripts",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lincolnqjunior/openclaw-postmaster.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "playwright": "^1.58.2",
+    "xlsx": "^0.18.5"
+  }
+}
