@@ -20,7 +20,7 @@ const dbPath     = get('--db',      path.join(__dirname, '../data/despesas_pix.s
 const cookiePath = get('--cookies', path.join(__dirname, '../data/cookies-google.json'));
 const dryRun     = has('--dry-run');
 
-const GATEWAY_TOKEN = 'GATEWAY_TOKEN_REMOVED';
+const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || require("../../../openclaw.json").gateway.auth.token;
 const WALLET_URL    = 'https://wallet.google.com/wallet/transactions';
 
 function makeUid(date, valor, recebedor) {
